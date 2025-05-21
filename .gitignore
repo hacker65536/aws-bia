@@ -1,0 +1,48 @@
+# Go build output files
+/aws-bia
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Output files
+*.out
+*.test
+output.txt
+test_upload.txt
+
+# Log files
+*.log
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Build cache
+.cache/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Local config files
+.env
+*.local.yaml
+*.local.json
+
+# Binary files
+bin/
+
+# Custom output directories
+/output/
+/files/
+
+# Temporary files
+tmp/
+temp/
