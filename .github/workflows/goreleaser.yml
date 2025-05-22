@@ -5,11 +5,12 @@ on:
     tags:
       - '*'
 
-permissions:
-  contents: write
 
 jobs:
   goreleaser:
+    name: GoReleaser
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       -
