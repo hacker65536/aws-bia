@@ -80,3 +80,12 @@ func initConfig() {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }
+
+func SetVersionInfo(version, commit, date string) {
+	// バージョン表示からvプレフィックスを削除
+	displayVersion := version
+	if len(version) > 0 && version[0] == 'v' {
+		displayVersion = version[1:]
+	}
+	rootCmd.Version = fmt.Sprintf("%s (Built on %s from Git SHA %s)", displayVersion, date, commit)
+}

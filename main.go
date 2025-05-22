@@ -10,8 +10,30 @@ and handling of all response types including text, citations, and generated file
 */
 package main
 
-import "github.com/hacker65536/aws-bia/cmd"
+import (
+	"time"
+
+	"github.com/carlmjohnson/versioninfo"
+	"github.com/hacker65536/aws-bia/cmd"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
+	if version == "dev" {
+		version = versioninfo.Version
+		commit = versioninfo.Revision
+		date = versioninfo.LastCommit.Format(time.RFC3339)
+	} else {
+		// Do not add the 'v' prefix if it is already present in the version string
+		if len(version) == 0 || version[0] != 'v' {
+			version = "v" + version
+		}
+	}
+	cmd.SetVersionInfo(version, commit, date)
 	cmd.Execute()
 }
