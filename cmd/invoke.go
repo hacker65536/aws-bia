@@ -58,6 +58,11 @@ type AgentOptions struct {
 	// File upload options
 	UploadFiles []string
 	FileUseCase string
+
+	// Prompt options
+	PromptFile string   // Path to a specific prompt file
+	PromptName string   // Name of a prompt template from the prompt directory
+	PromptVars []string // Variables to substitute in the prompt template (format: key=value)
 }
 
 var opts AgentOptions
@@ -92,6 +97,15 @@ Examples:
 
   # Upload files to the agent for analysis
   aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Analyze this data" --upload-files data.csv,config.json
+  
+  # Use a predefined prompt template
+  aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt code-review
+  
+  # Use a prompt template with variables
+  aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt translation --var language=Japanese --var text="Hello world"
+  
+  # Combine a prompt with additional input
+  aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt system-prompt --input "Generate a Python script"
 `,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Handle interrupts gracefully
@@ -130,6 +144,11 @@ func init() {
 	invokeCmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Enable verbose output")
 	invokeCmd.Flags().StringSliceVar(&opts.UploadFiles, "upload-files", []string{}, "File paths to upload to the agent (comma-separated)")
 	invokeCmd.Flags().StringVar(&opts.FileUseCase, "file-use-case", FileUseCaseCodeInterpreter, "File use case: CODE_INTERPRETER or other supported values")
+
+	// Prompt flags
+	invokeCmd.Flags().StringVar(&opts.PromptFile, "prompt-file", "", "Path to a prompt file to use")
+	invokeCmd.Flags().StringVar(&opts.PromptName, "prompt", "", "Name of a predefined prompt to use")
+	invokeCmd.Flags().StringSliceVar(&opts.PromptVars, "var", []string{}, "Variables for prompt template (format: key=value)")
 }
 
 // runInvokeCommand handles the agent invocation based on the provided options
@@ -137,6 +156,13 @@ func runInvokeCommand(ctx context.Context, opts AgentOptions) error {
 	// Load configuration from file if specified
 	if err := loadConfig(opts.ConfigFile); err != nil {
 		return err
+	}
+
+	// Process prompt if specified
+	if opts.PromptName != "" || opts.PromptFile != "" {
+		if err := processPrompt(&opts); err != nil {
+			return err
+		}
 	}
 
 	// Validate inputs before proceeding
@@ -333,6 +359,51 @@ func loadConfig(configPath string) error {
 	if v.IsSet("region") && opts.Region == "" {
 		opts.Region = v.GetString("region")
 	}
+
+	return nil
+}
+
+// processPrompt loads and processes a prompt template if specified
+func processPrompt(opts *AgentOptions) error {
+	// Don't do anything if neither prompt name nor file is provided
+	if opts.PromptName == "" && opts.PromptFile == "" {
+		return nil
+	}
+
+	// Initialize the prompt manager
+	pm := NewPromptManager()
+
+	// Load the prompt content
+	promptContent, err := pm.LoadPrompt(opts.PromptName, opts.PromptFile)
+	if err != nil {
+		return err
+	}
+
+	// Apply template variables if any
+	processedPrompt, err := pm.ProcessPromptTemplate(promptContent, opts.PromptVars)
+	if err != nil {
+		return err
+	}
+
+	// Check if we got any content
+	if processedPrompt == "" {
+		return fmt.Errorf("loaded prompt is empty")
+	}
+
+	// If input text is already provided, consider the prompt as a prefix or template
+	if opts.InputText != "" {
+		// Append or replace depends on whether the prompt contains a placeholder
+		if strings.Contains(processedPrompt, "{{input}}") {
+			// Replace the placeholder with the input text
+			processedPrompt = strings.ReplaceAll(processedPrompt, "{{input}}", opts.InputText)
+		} else {
+			// Otherwise, append the input to the prompt
+			processedPrompt = processedPrompt + "\n" + opts.InputText
+		}
+	}
+
+	// Set the processed prompt as the input text
+	opts.InputText = processedPrompt
 
 	return nil
 }
