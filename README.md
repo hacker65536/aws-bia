@@ -1,14 +1,16 @@
 # AWS-BIA (AWS Bedrock Intelligent Agents CLI)
 
-A command-line interface tool for interacting with AWS Bedrock Intelligent Agents.
+A powerful command-line interface tool for interacting with AWS Bedrock Intelligent Agents. AWS-BIA provides a comprehensive set of features including streaming responses, file uploads, prompt templates, and flexible configuration options.
 
 ## Installation
+
+### Using Go Install (Recommended)
 
 ```bash
 go install github.com/hacker65536/aws-bia@latest
 ```
 
-Or clone the repository and build it manually:
+### Manual Build
 
 ```bash
 git clone https://github.com/hacker65536/aws-bia.git
@@ -16,12 +18,41 @@ cd aws-bia
 go build -o aws-bia
 ```
 
+### Using Pre-built Releases
+
+Download the latest binary from the [releases page](https://github.com/hacker65536/aws-bia/releases).
+
 ## Configuration
+
+### AWS Configuration
 
 AWS-BIA uses the standard AWS configuration from your environment. Make sure you have:
 
-1. AWS credentials properly configured in `~/.aws/credentials` or via environment variables
-2. The necessary IAM permissions to use AWS Bedrock services
+1. **AWS Credentials**: Properly configured in `~/.aws/credentials` or via environment variables
+2. **IAM Permissions**: The necessary IAM permissions to use AWS Bedrock services
+3. **AWS Region**: Set via environment variable `AWS_REGION` or specify with `--region` flag
+
+### Configuration File Support
+
+AWS-BIA supports YAML configuration files to store commonly used settings:
+
+**Default locations (searched in order):**
+- `./aws-bia.yaml` (current directory)
+- `~/.aws-bia.yaml` (home directory)
+- `~/.aws-bia/aws-bia.yaml` (config directory)
+
+**Example configuration file:**
+```yaml
+# ~/.aws-bia.yaml
+agent_id: "your-default-agent-id"
+agent_alias_id: "your-default-alias-id"
+region: "us-west-2"
+```
+
+**Using a specific config file:**
+```bash
+aws-bia invoke --config /path/to/config.yaml --input "Your question"
+```
 
 ## Usage
 
@@ -57,6 +88,95 @@ aws-bia invoke --agent-id your-agent-id --agent-alias-id your-alias-id --input "
 
 # Combining options
 aws-bia invoke --agent-id your-agent-id --agent-alias-id your-alias-id --input "Your question" --stream --format json --output-file response.json
+```
+
+## Prompt Templates
+
+AWS-BIA includes built-in prompt templates for common use cases, making it easy to apply structured prompts without writing them from scratch.
+
+### Available Templates
+
+- **aws-expert**: Expert-level AWS consulting and guidance
+- **code-review**: Code review and analysis prompts
+- **terraform**: Infrastructure as Code and Terraform-specific prompts
+- **translation**: Language translation prompts
+
+### Using Prompt Templates
+
+```bash
+# Use a predefined prompt template (input is optional when using prompts)
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt code-review
+
+# Use a prompt template with variables
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt translation --var language=Japanese --var text="Hello world"
+
+# Combine a prompt template with additional input
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt aws-expert --input "How do I optimize my Lambda functions?"
+
+# Use a custom prompt file (no need for --input)
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt-file ./my-custom-prompt.txt --var project=MyApp
+```
+
+### Template Variables
+
+Prompt templates support variable substitution using the `--var` flag:
+
+```bash
+# Single variable
+aws-bia invoke --prompt translation --var language=Spanish --input "Translate this text"
+
+# Multiple variables
+aws-bia invoke --prompt terraform --var environment=production --var region=us-east-1 --input "Review this configuration"
+```
+
+### Custom Prompt Files
+
+You can also use your own prompt files:
+
+```bash
+# Use a custom prompt file
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --prompt-file ./prompts/custom-prompt.txt --input "Your question"
+```
+
+**Template placeholders:**
+- `{{input}}`: Replaced with the `--input` text (optional, can be omitted)
+- `{{variable_name}}`: Replaced with values from `--var variable_name=value`
+- `{{#if variable}}...{{/if}}`: Conditional content based on variable existence
+- Template functions: `toLowerCase`, `toUpperCase`, `replace`, etc.
+
+## Advanced Features
+
+### Output Management
+
+```bash
+# Save response to a specific file
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Generate a report" --output-file ./reports/analysis.txt
+
+# Save generated files to a directory
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Create charts" --save-files ./output
+
+# JSON format for programmatic use
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Your question" --format json --output-file response.json
+```
+
+### Timeout and Debugging
+
+```bash
+# Set custom timeout (default: 30s)
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Complex analysis" --timeout 60s
+
+# Enable verbose logging for debugging
+aws-bia invoke --agent-id abc123 --agent-alias-id def456 --input "Your question" --verbose
+```
+
+### Configuration-based Usage
+
+```bash
+# Using configuration file (agent IDs from config)
+aws-bia invoke --config ~/.aws-bia.yaml --input "Your question"
+
+# Override config settings with command line flags
+aws-bia invoke --config ~/.aws-bia.yaml --region us-east-1 --input "Your question"
 ```
 
 ## Streaming Mode

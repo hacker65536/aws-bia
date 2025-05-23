@@ -49,3 +49,8 @@ temp/
 
 
 tfplan.*
+.aws-bia.yaml
+.aws-bia.yml
+aws-bia.yml
+aws-bia.yaml
+test.*

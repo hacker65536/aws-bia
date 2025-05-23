@@ -12,12 +12,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // Constants for configuration
@@ -128,10 +126,10 @@ func init() {
 	// Required flags
 	invokeCmd.Flags().StringVar(&opts.AgentID, "agent-id", "", "The ID of the agent to invoke (can be set in config file)")
 	invokeCmd.Flags().StringVar(&opts.AgentAliasID, "agent-alias-id", "", "The ID of the agent alias to invoke (can be set in config file)")
-	invokeCmd.Flags().StringVar(&opts.InputText, "input", "", "The input text to send to the agent")
+	invokeCmd.Flags().StringVar(&opts.InputText, "input", "", "The input text to send to the agent (can be omitted when using --prompt or --prompt-file)")
 
-	// Only mark input as required - agent IDs can come from config
-	invokeCmd.MarkFlagRequired("input")
+	// We'll validate input requirements in the validateOptions function
+	// This allows us to make input optional when a prompt is provided
 
 	// Optional flags
 	invokeCmd.Flags().StringVar(&opts.SessionID, "session-id", "", "The session ID for the conversation (if not provided, a random ID will be generated)")
@@ -154,7 +152,7 @@ func init() {
 // runInvokeCommand handles the agent invocation based on the provided options
 func runInvokeCommand(ctx context.Context, opts AgentOptions) error {
 	// Load configuration from file if specified
-	if err := loadConfig(opts.ConfigFile); err != nil {
+	if err := loadConfig(opts.ConfigFile, &opts); err != nil {
 		return err
 	}
 
@@ -249,8 +247,10 @@ func validateRequiredFields(opts AgentOptions) error {
 	if opts.AgentAliasID == "" {
 		return fmt.Errorf("agent alias ID is required")
 	}
-	if opts.InputText == "" {
-		return fmt.Errorf("input text is required")
+
+	// Input is only required if no prompt or prompt file is specified
+	if opts.InputText == "" && opts.PromptName == "" && opts.PromptFile == "" {
+		return fmt.Errorf("input is required (or use --prompt/--prompt-file)")
 	}
 	return nil
 }
@@ -311,53 +311,46 @@ func validateFileUploadOptions(opts AgentOptions) error {
 }
 
 // loadConfig loads agent configuration from a YAML file using Viper
-func loadConfig(configPath string) error {
-	v := viper.New()
-
-	// Set default config name and locations
-	v.SetConfigName("aws-bia")
-	v.SetConfigType("yaml")
-
-	// Add default search paths
-	v.AddConfigPath(".") // Current directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		v.AddConfigPath(homeDir)                            // User's home directory
-		v.AddConfigPath(filepath.Join(homeDir, ".aws-bia")) // .aws-bia in home directory
+func loadConfig(configPath string, options *AgentOptions) error {
+	// Use the centralized config loading function from root.go
+	v, err := LoadConfigForCommand(configPath, options.Verbose)
+	if err != nil {
+		return err
 	}
 
-	// If config file is explicitly specified, use it
-	if configPath != "" {
-		// Check if the file exists
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			return fmt.Errorf("specified config file not found: %s", configPath)
+	// Check if we found any configuration values
+	settingsFound := false
+
+	// Load agent ID if set in config and not provided via flag
+	if v.InConfig("agent_id") && options.AgentID == "" {
+		settingsFound = true
+		options.AgentID = v.GetString("agent_id")
+		if options.Verbose {
+			fmt.Fprintf(os.Stderr, "Loaded agent ID from config: %s\n", options.AgentID)
 		}
-
-		v.SetConfigFile(configPath)
 	}
 
-	// Read config file
-	if err := v.ReadInConfig(); err != nil {
-		// Only return error if a config file was explicitly specified
-		if configPath != "" {
-			return fmt.Errorf("failed to read config file: %w", err)
+	// Load agent alias ID if set in config and not provided via flag
+	if v.InConfig("agent_alias_id") && options.AgentAliasID == "" {
+		settingsFound = true
+		options.AgentAliasID = v.GetString("agent_alias_id")
+		if options.Verbose {
+			fmt.Fprintf(os.Stderr, "Loaded agent alias ID from config: %s\n", options.AgentAliasID)
 		}
-		// If no config was specified and we couldn't find one, that's okay
-		return nil
 	}
 
-	// If a config file was found, read the agent and alias IDs
-	if v.IsSet("agent_id") && opts.AgentID == "" {
-		opts.AgentID = v.GetString("agent_id")
+	// Load region if set in config and not provided via flag
+	if v.InConfig("region") && options.Region == "" {
+		settingsFound = true
+		options.Region = v.GetString("region")
+		if options.Verbose {
+			fmt.Fprintf(os.Stderr, "Loaded region from config: %s\n", options.Region)
+		}
 	}
 
-	if v.IsSet("agent_alias_id") && opts.AgentAliasID == "" {
-		opts.AgentAliasID = v.GetString("agent_alias_id")
-	}
-
-	// Also load region if set in config file and not provided via flag
-	if v.IsSet("region") && opts.Region == "" {
-		opts.Region = v.GetString("region")
+	// If config file was found but had no relevant settings, show a warning
+	if !settingsFound && v.ConfigFileUsed() != "" && options.Verbose {
+		fmt.Fprintln(os.Stderr, "Warning: Config file found but no agent_id or agent_alias_id settings found")
 	}
 
 	return nil
@@ -399,6 +392,11 @@ func processPrompt(opts *AgentOptions) error {
 		} else {
 			// Otherwise, append the input to the prompt
 			processedPrompt = processedPrompt + "\n" + opts.InputText
+		}
+	} else {
+		// If no input is provided, use the prompt as-is, but replace any {{input}} with empty string
+		if strings.Contains(processedPrompt, "{{input}}") {
+			processedPrompt = strings.ReplaceAll(processedPrompt, "{{input}}", "")
 		}
 	}
 

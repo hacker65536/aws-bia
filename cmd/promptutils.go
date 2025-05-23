@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -108,17 +109,47 @@ func (pm *PromptManager) ProcessPromptTemplate(promptContent string, vars []stri
 	}
 
 	// Convert vars slice to map
-	varMap := make(map[string]string)
+	varMap := make(map[string]interface{})
 	for _, v := range vars {
 		parts := strings.SplitN(v, "=", 2)
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid variable format '%s', expected 'key=value'", v)
 		}
-		varMap[parts[0]] = parts[1]
+
+		// Allow boolean and numeric values for advanced templating
+		switch strings.ToLower(parts[1]) {
+		case "true":
+			varMap[parts[0]] = true
+		case "false":
+			varMap[parts[0]] = false
+		default:
+			// Try to parse as number
+			if num, err := strconv.ParseFloat(parts[1], 64); err == nil {
+				varMap[parts[0]] = num
+			} else {
+				// Default to string
+				varMap[parts[0]] = parts[1]
+			}
+		}
+	}
+
+	// Create a template with handlebars-style functions for more powerful templating
+	funcMap := template.FuncMap{
+		"toLowerCase": strings.ToLower,
+		"toUpperCase": strings.ToUpper,
+		"replace": func(old, new, s string) string {
+			return strings.ReplaceAll(s, old, new)
+		},
+		"join":      strings.Join,
+		"split":     strings.Split,
+		"contains":  strings.Contains,
+		"hasPrefix": strings.HasPrefix,
+		"hasSuffix": strings.HasSuffix,
+		"trim":      strings.TrimSpace,
 	}
 
 	// Parse and execute the template
-	tmpl, err := template.New("prompt").Parse(promptContent)
+	tmpl, err := template.New("prompt").Funcs(funcMap).Parse(promptContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse prompt template: %w", err)
 	}
