@@ -346,9 +346,21 @@ func loadConfig(configPath string, options *AgentOptions) error {
 		logVerbose(*options, "Loaded region from config: %s", options.Region)
 	}
 
+	// Load timeout if set in config and not provided via flag (check if it's still the default value)
+	if v.InConfig("timeout") && options.Timeout == DefaultTimeout {
+		settingsFound = true
+		timeoutDuration := v.GetDuration("timeout")
+		if timeoutDuration > 0 {
+			options.Timeout = timeoutDuration
+			logVerbose(*options, "Loaded timeout from config: %s", options.Timeout)
+		} else {
+			logVerbose(*options, "Invalid timeout value in config, using default: %s", DefaultTimeout)
+		}
+	}
+
 	// If config file was found but had no relevant settings, show a warning
 	if !settingsFound && v.ConfigFileUsed() != "" && options.Verbose {
-		LogWarn("Config file found but no agent_id or agent_alias_id settings found")
+		LogWarn("Config file found but no agent_id, agent_alias_id, region, or timeout settings found")
 	}
 
 	return nil
