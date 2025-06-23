@@ -47,6 +47,7 @@ AWS-BIA supports YAML configuration files to store commonly used settings:
 agent_id: "your-default-agent-id"
 agent_alias_id: "your-default-alias-id"
 region: "us-west-2"
+timeout: "60s"  # Request timeout (supports formats like "30s", "1m", "2h30m")
 ```
 
 **Using a specific config file:**
