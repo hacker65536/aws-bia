@@ -151,6 +151,10 @@ func init() {
 
 // runInvokeCommand handles the agent invocation based on the provided options
 func runInvokeCommand(ctx context.Context, opts AgentOptions) error {
+	// Initialize logger based on verbose flag
+	InitLogger(opts.Verbose)
+	defer SyncLogger()
+
 	// Load configuration from file if specified
 	if err := loadConfig(opts.ConfigFile, &opts); err != nil {
 		return err
@@ -325,32 +329,26 @@ func loadConfig(configPath string, options *AgentOptions) error {
 	if v.InConfig("agent_id") && options.AgentID == "" {
 		settingsFound = true
 		options.AgentID = v.GetString("agent_id")
-		if options.Verbose {
-			fmt.Fprintf(os.Stderr, "Loaded agent ID from config: %s\n", options.AgentID)
-		}
+		logVerbose(*options, "Loaded agent ID from config: %s", options.AgentID)
 	}
 
 	// Load agent alias ID if set in config and not provided via flag
 	if v.InConfig("agent_alias_id") && options.AgentAliasID == "" {
 		settingsFound = true
 		options.AgentAliasID = v.GetString("agent_alias_id")
-		if options.Verbose {
-			fmt.Fprintf(os.Stderr, "Loaded agent alias ID from config: %s\n", options.AgentAliasID)
-		}
+		logVerbose(*options, "Loaded agent alias ID from config: %s", options.AgentAliasID)
 	}
 
 	// Load region if set in config and not provided via flag
 	if v.InConfig("region") && options.Region == "" {
 		settingsFound = true
 		options.Region = v.GetString("region")
-		if options.Verbose {
-			fmt.Fprintf(os.Stderr, "Loaded region from config: %s\n", options.Region)
-		}
+		logVerbose(*options, "Loaded region from config: %s", options.Region)
 	}
 
 	// If config file was found but had no relevant settings, show a warning
 	if !settingsFound && v.ConfigFileUsed() != "" && options.Verbose {
-		fmt.Fprintln(os.Stderr, "Warning: Config file found but no agent_id or agent_alias_id settings found")
+		LogWarn("Config file found but no agent_id or agent_alias_id settings found")
 	}
 
 	return nil

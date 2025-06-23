@@ -5,21 +5,16 @@ This file implements helper utilities shared across the CLI commands.
 */
 package cmd
 
-import (
-	"fmt"
-	"os"
-)
-
 // logVerbose logs a message if verbose mode is enabled
+// This function is now a wrapper around LogVerbose for backward compatibility
 func logVerbose(opts AgentOptions, format string, args ...interface{}) {
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "[VERBOSE] "+format+"\n", args...)
-	}
+	LogVerbose(opts, format, args...)
 }
 
 // logError logs an error message
+// This function is now a wrapper around LogError for backward compatibility
 func logError(message string, err error) {
-	fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
+	LogError(message, err)
 }
 
 // For backward compatibility with existing code
