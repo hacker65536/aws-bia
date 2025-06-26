@@ -21,6 +21,7 @@ type StreamProcessor struct {
 	Options     AgentOptions
 	Writer      io.Writer
 	WriteOutput bool
+	isVerbose   bool // Cache verbose flag to avoid repeated checks
 }
 
 // NewStreamProcessor creates a new StreamProcessor
@@ -29,6 +30,7 @@ func NewStreamProcessor(opts AgentOptions, writer io.Writer, writeOutput bool) *
 		Options:     opts,
 		Writer:      writer,
 		WriteOutput: writeOutput,
+		isVerbose:   opts.Verbose, // Cache the verbose flag
 	}
 }
 
@@ -42,9 +44,13 @@ func (sp *StreamProcessor) ProcessStream(stream *bedrockagentruntime.InvokeAgent
 	var outputFiles []types.OutputFile
 	var hasReturnControl bool
 
+	// Pre-compute format check to avoid repeated string comparisons
+	isTextFormat := sp.Options.OutputFormat == "text"
+	writeTextOutput := sp.WriteOutput && isTextFormat
+
 	// Process the streaming response
 	for event := range stream.Events() {
-		if sp.Options.Verbose {
+		if sp.isVerbose {
 			logVerbose(sp.Options, "Processing event type: %T", event)
 		}
 
@@ -56,7 +62,7 @@ func (sp *StreamProcessor) ProcessStream(stream *bedrockagentruntime.InvokeAgent
 				textResponse.WriteString(chunk)
 
 				// Write the output if requested (for streaming mode or text format)
-				if sp.WriteOutput && sp.Options.OutputFormat == "text" {
+				if writeTextOutput {
 					fmt.Fprint(sp.Writer, chunk)
 				}
 			}
@@ -71,7 +77,7 @@ func (sp *StreamProcessor) ProcessStream(stream *bedrockagentruntime.InvokeAgent
 			if len(v.Value.Files) > 0 {
 				outputFiles = append(outputFiles, v.Value.Files...)
 
-				if sp.WriteOutput && sp.Options.OutputFormat == "text" {
+				if writeTextOutput {
 					fmt.Fprintf(sp.Writer, "\n\n[Generated %d file(s)]\n", len(v.Value.Files))
 					for i, file := range v.Value.Files {
 						fmt.Fprintf(sp.Writer, "  %d. %s", i+1, *file.Name)
@@ -85,14 +91,14 @@ func (sp *StreamProcessor) ProcessStream(stream *bedrockagentruntime.InvokeAgent
 
 		case *types.ResponseStreamMemberTrace:
 			// Just log trace events in verbose mode
-			if sp.Options.Verbose {
+			if sp.isVerbose {
 				logVerbose(sp.Options, "Received trace event")
 			}
 
 		case *types.ResponseStreamMemberReturnControl:
 			// When agent returns control (for custom control flows)
 			hasReturnControl = true
-			if sp.WriteOutput && sp.Options.OutputFormat == "text" {
+			if writeTextOutput {
 				fmt.Fprintln(sp.Writer, "\n[Agent returned control]")
 				if v.Value.InvocationId != nil {
 					fmt.Fprintf(sp.Writer, "Invocation ID: %s\n", *v.Value.InvocationId)
@@ -103,7 +109,7 @@ func (sp *StreamProcessor) ProcessStream(stream *bedrockagentruntime.InvokeAgent
 			}
 
 		default:
-			if sp.Options.Verbose {
+			if sp.isVerbose {
 				logVerbose(sp.Options, "Unknown event type: %T", event)
 			}
 		}

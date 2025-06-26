@@ -20,25 +20,31 @@ import (
 
 // FileHelper provides methods for file-related operations
 type FileHelper struct {
-	Options AgentOptions
+	Options         AgentOptions
+	hasUploadFiles  bool // Cache upload files check
+	uploadFileCount int  // Cache count
 }
 
 // NewFileHelper creates a new FileHelper with the given options
 func NewFileHelper(opts AgentOptions) *FileHelper {
+	uploadCount := len(opts.UploadFiles)
 	return &FileHelper{
-		Options: opts,
+		Options:         opts,
+		hasUploadFiles:  uploadCount > 0,
+		uploadFileCount: uploadCount,
 	}
 }
 
 // PrepareInputFiles processes file paths from options and prepares them for upload
 func (f *FileHelper) PrepareInputFiles() ([]types.InputFile, error) {
-	if len(f.Options.UploadFiles) == 0 {
+	if !f.hasUploadFiles {
 		return nil, nil
 	}
 
-	// Process each uploaded file
-	inputFiles := make([]types.InputFile, 0, len(f.Options.UploadFiles))
+	// Pre-allocate with exact capacity
+	inputFiles := make([]types.InputFile, 0, f.uploadFileCount)
 	var totalSize int64
+	const maxSize = 10 * 1024 * 1024 // 10MB limit
 
 	for _, filePath := range f.Options.UploadFiles {
 		// Get file info
@@ -47,8 +53,12 @@ func (f *FileHelper) PrepareInputFiles() ([]types.InputFile, error) {
 			return nil, fmt.Errorf("failed to get file info for '%s': %w", filePath, err)
 		}
 
-		// Update total size
+		// Update total size and check early
 		totalSize += fileInfo.Size()
+		if totalSize > maxSize {
+			return nil, fmt.Errorf("total upload file size exceeds 10MB limit (got %.2fMB)",
+				float64(totalSize)/(1024*1024))
+		}
 
 		// Read the file content
 		fileContent, err := os.ReadFile(filePath)
@@ -56,12 +66,15 @@ func (f *FileHelper) PrepareInputFiles() ([]types.InputFile, error) {
 			return nil, fmt.Errorf("failed to read file '%s': %w", filePath, err)
 		}
 
+		// Cache base name to avoid repeated calls
+		baseName := filepath.Base(filePath)
+
 		// Detect MIME type
 		mimeType := DetectMimeType(filePath, fileContent)
 
 		// Create the input file
 		inputFile := types.InputFile{
-			Name: aws.String(filepath.Base(filePath)),
+			Name: aws.String(baseName),
 			Source: &types.FileSource{
 				SourceType: types.FileSourceTypeByteContent,
 				ByteContent: &types.ByteContentFile{
@@ -74,13 +87,7 @@ func (f *FileHelper) PrepareInputFiles() ([]types.InputFile, error) {
 
 		inputFiles = append(inputFiles, inputFile)
 		logVerbose(f.Options, "Added file '%s' for upload (type: %s, size: %d bytes)",
-			filepath.Base(filePath), mimeType, len(fileContent))
-	}
-
-	// Check total size limit (10MB)
-	if totalSize > 10*1024*1024 {
-		return nil, fmt.Errorf("total upload file size exceeds 10MB limit (got %.2fMB)",
-			float64(totalSize)/(1024*1024))
+			baseName, mimeType, len(fileContent))
 	}
 
 	return inputFiles, nil
@@ -127,14 +134,13 @@ func (f *FileHelper) HandleFileOutput(files []types.OutputFile) ([]string, error
 
 // FormatUploadedFilesInfo formats uploaded files information for output
 func (f *FileHelper) FormatUploadedFilesInfo() ([]map[string]interface{}, error) {
-	if len(f.Options.UploadFiles) == 0 {
+	if !f.hasUploadFiles {
 		return nil, nil
 	}
 
-	uploadedFiles := make([]map[string]interface{}, 0, len(f.Options.UploadFiles))
+	uploadedFiles := make([]map[string]interface{}, 0, f.uploadFileCount)
 	for _, file := range f.Options.UploadFiles {
-		fileInfo, err := os.Stat(file)
-		if err == nil {
+		if fileInfo, err := os.Stat(file); err == nil {
 			uploadedFiles = append(uploadedFiles, map[string]interface{}{
 				"name": filepath.Base(file),
 				"size": fileInfo.Size(),
@@ -200,10 +206,13 @@ func DetectMimeType(filePath string, content []byte) string {
 		case ".pptx", ".ppt":
 			return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 		}
+		return mimeType
 	}
+
+	// Optimize text MIME type processing
 	if strings.HasPrefix(mimeType, "text/") {
-		if idx := strings.Index(mimeType, ";"); idx != -1 {
-			mimeType = mimeType[:idx]
+		if idx := strings.IndexByte(mimeType, ';'); idx != -1 {
+			return mimeType[:idx]
 		}
 	}
 

@@ -20,23 +20,27 @@ import (
 
 // ResponseFormatter handles formatting and output of agent responses
 type ResponseFormatter struct {
-	Options    AgentOptions
-	Writer     io.Writer
-	FileHelper *FileHelper
+	Options        AgentOptions
+	Writer         io.Writer
+	FileHelper     *FileHelper
+	isJSONFormat   bool // Cache format check
+	hasUploadFiles bool // Cache upload files check
 }
 
 // NewResponseFormatter creates a new ResponseFormatter
 func NewResponseFormatter(opts AgentOptions, writer io.Writer) *ResponseFormatter {
 	return &ResponseFormatter{
-		Options:    opts,
-		Writer:     writer,
-		FileHelper: NewFileHelper(opts),
+		Options:        opts,
+		Writer:         writer,
+		FileHelper:     NewFileHelper(opts),
+		isJSONFormat:   opts.OutputFormat == "json",
+		hasUploadFiles: len(opts.UploadFiles) > 0,
 	}
 }
 
 // FormatAndWriteResponse formats the response based on the output format and writes it to the writer
 func (rf *ResponseFormatter) FormatAndWriteResponse(output *bedrockagentruntime.InvokeAgentOutput) error {
-	if rf.Options.OutputFormat == "json" {
+	if rf.isJSONFormat {
 		return rf.writeJSONResponse(output)
 	}
 	return rf.writeTextResponse(output)
@@ -48,14 +52,14 @@ func (rf *ResponseFormatter) writeTextResponse(output *bedrockagentruntime.Invok
 	fmt.Fprintln(rf.Writer, "Agent Response:")
 
 	// Show uploaded files info if any
-	if len(rf.Options.UploadFiles) > 0 {
+	if rf.hasUploadFiles {
 		fmt.Fprintf(rf.Writer, "[Uploaded %d file(s) to agent]\n", len(rf.Options.UploadFiles))
 		for i, file := range rf.Options.UploadFiles {
-			fileInfo, err := fileInfo(file)
-			if err == nil {
-				fmt.Fprintf(rf.Writer, "  %d. %s (%.2f KB)\n", i+1, filepath.Base(file), float64(fileInfo.Size())/1024)
+			baseName := filepath.Base(file)
+			if fileInfo, err := fileInfo(file); err == nil {
+				fmt.Fprintf(rf.Writer, "  %d. %s (%.2f KB)\n", i+1, baseName, float64(fileInfo.Size())/1024)
 			} else {
-				fmt.Fprintf(rf.Writer, "  %d. %s\n", i+1, filepath.Base(file))
+				fmt.Fprintf(rf.Writer, "  %d. %s\n", i+1, baseName)
 			}
 		}
 		fmt.Fprintln(rf.Writer)
@@ -180,7 +184,7 @@ func (rf *ResponseFormatter) addResponseMetadata(
 	}
 
 	// Add uploaded files information if any
-	if len(rf.Options.UploadFiles) > 0 {
+	if rf.hasUploadFiles {
 		uploadedFiles, err := rf.FileHelper.FormatUploadedFilesInfo()
 		if err == nil && len(uploadedFiles) > 0 {
 			response["uploadedFiles"] = uploadedFiles
@@ -217,20 +221,26 @@ func (rf *ResponseFormatter) addResponseMetadata(
 
 // formatCitationsForJSON formats citations for JSON output
 func (rf *ResponseFormatter) formatCitationsForJSON(citations []types.Citation) []map[string]interface{} {
+	if len(citations) == 0 {
+		return nil
+	}
+
 	formattedCitations := make([]map[string]interface{}, 0, len(citations))
 	for _, citation := range citations {
-		citationInfo := map[string]interface{}{}
+		citationInfo := make(map[string]interface{})
 
+		// Check for generated response part text
 		if citation.GeneratedResponsePart != nil &&
 			citation.GeneratedResponsePart.TextResponsePart != nil &&
 			citation.GeneratedResponsePart.TextResponsePart.Text != nil {
 			citationInfo["text"] = *citation.GeneratedResponsePart.TextResponsePart.Text
 		}
 
-		if len(citation.RetrievedReferences) > 0 {
-			refs := make([]map[string]interface{}, 0, len(citation.RetrievedReferences))
+		// Process retrieved references
+		if numRefs := len(citation.RetrievedReferences); numRefs > 0 {
+			refs := make([]map[string]interface{}, 0, numRefs)
 			for _, ref := range citation.RetrievedReferences {
-				refInfo := map[string]interface{}{}
+				refInfo := make(map[string]interface{})
 
 				if ref.Location != nil {
 					refInfo["locationType"] = ref.Location.Type
@@ -240,12 +250,18 @@ func (rf *ResponseFormatter) formatCitationsForJSON(citations []types.Citation) 
 					refInfo["contentText"] = *ref.Content.Text
 				}
 
-				refs = append(refs, refInfo)
+				if len(refInfo) > 0 {
+					refs = append(refs, refInfo)
+				}
 			}
-			citationInfo["references"] = refs
+			if len(refs) > 0 {
+				citationInfo["references"] = refs
+			}
 		}
 
-		formattedCitations = append(formattedCitations, citationInfo)
+		if len(citationInfo) > 0 {
+			formattedCitations = append(formattedCitations, citationInfo)
+		}
 	}
 	return formattedCitations
 }

@@ -261,14 +261,14 @@ func validateRequiredFields(opts AgentOptions) error {
 
 // validateOutputFormat validates the output format is supported
 func validateOutputFormat(opts AgentOptions) error {
-	validFormats := []string{OutputFormatText, OutputFormatJSON}
-	for _, format := range validFormats {
-		if opts.OutputFormat == format {
-			return nil
-		}
+	// Direct comparison instead of loop for better performance
+	switch opts.OutputFormat {
+	case OutputFormatText, OutputFormatJSON:
+		return nil
+	default:
+		return fmt.Errorf("output format must be one of: %s, %s, got '%s'",
+			OutputFormatText, OutputFormatJSON, opts.OutputFormat)
 	}
-	return fmt.Errorf("output format must be one of: %s, got '%s'",
-		strings.Join(validFormats, ", "), opts.OutputFormat)
 }
 
 // validateFilesOutputDir validates the directory for saving files
@@ -286,8 +286,14 @@ func validateFilesOutputDir(opts AgentOptions) error {
 
 // validateFileUploadOptions validates file upload-related options
 func validateFileUploadOptions(opts AgentOptions) error {
-	if len(opts.UploadFiles) == 0 {
+	uploadCount := len(opts.UploadFiles)
+	if uploadCount == 0 {
 		return nil
+	}
+
+	// Check file count limit early
+	if uploadCount > MaxUploadFiles {
+		return fmt.Errorf("maximum %d files can be uploaded, got %d", MaxUploadFiles, uploadCount)
 	}
 
 	// Check if files exist
@@ -297,21 +303,14 @@ func validateFileUploadOptions(opts AgentOptions) error {
 		}
 	}
 
-	// Check file count limit
-	if len(opts.UploadFiles) > MaxUploadFiles {
-		return fmt.Errorf("maximum %d files can be uploaded, got %d", MaxUploadFiles, len(opts.UploadFiles))
+	// Validate file use case with direct comparison instead of loop
+	switch opts.FileUseCase {
+	case FileUseCaseCodeInterpreter, FileUseCaseChat:
+		return nil
+	default:
+		return fmt.Errorf("file-use-case must be one of: %s, %s, got '%s'",
+			FileUseCaseCodeInterpreter, FileUseCaseChat, opts.FileUseCase)
 	}
-
-	// Validate file use case
-	allowedUseCases := []string{FileUseCaseCodeInterpreter, FileUseCaseChat}
-	for _, useCase := range allowedUseCases {
-		if opts.FileUseCase == useCase {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("file-use-case must be one of: %s, got '%s'",
-		strings.Join(allowedUseCases, ", "), opts.FileUseCase)
 }
 
 // loadConfig loads agent configuration from a YAML file using Viper
@@ -393,21 +392,28 @@ func processPrompt(opts *AgentOptions) error {
 		return fmt.Errorf("loaded prompt is empty")
 	}
 
+	// Cache input placeholder for efficiency
+	const inputPlaceholder = "{{input}}"
+	hasInputPlaceholder := strings.Contains(processedPrompt, inputPlaceholder)
+
 	// If input text is already provided, consider the prompt as a prefix or template
 	if opts.InputText != "" {
 		// Append or replace depends on whether the prompt contains a placeholder
-		if strings.Contains(processedPrompt, "{{input}}") {
+		if hasInputPlaceholder {
 			// Replace the placeholder with the input text
-			processedPrompt = strings.ReplaceAll(processedPrompt, "{{input}}", opts.InputText)
+			processedPrompt = strings.ReplaceAll(processedPrompt, inputPlaceholder, opts.InputText)
 		} else {
-			// Otherwise, append the input to the prompt
-			processedPrompt = processedPrompt + "\n" + opts.InputText
+			// Otherwise, append the input to the prompt (use strings.Builder for efficiency)
+			var builder strings.Builder
+			builder.Grow(len(processedPrompt) + 1 + len(opts.InputText)) // Pre-allocate
+			builder.WriteString(processedPrompt)
+			builder.WriteByte('\n')
+			builder.WriteString(opts.InputText)
+			processedPrompt = builder.String()
 		}
-	} else {
+	} else if hasInputPlaceholder {
 		// If no input is provided, use the prompt as-is, but replace any {{input}} with empty string
-		if strings.Contains(processedPrompt, "{{input}}") {
-			processedPrompt = strings.ReplaceAll(processedPrompt, "{{input}}", "")
-		}
+		processedPrompt = strings.ReplaceAll(processedPrompt, inputPlaceholder, "")
 	}
 
 	// Set the processed prompt as the input text

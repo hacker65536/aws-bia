@@ -11,14 +11,18 @@ import (
 )
 
 var (
-	logger *zap.Logger
-	sugar  *zap.SugaredLogger
+	logger      *zap.Logger
+	sugar       *zap.SugaredLogger
+	initialized bool // Track initialization state to avoid redundant calls
 )
 
 // InitLogger initializes the global logger based on verbose mode
 func InitLogger(verbose bool) {
-	config := zap.NewProductionConfig()
+	if initialized {
+		return // Avoid redundant initialization
+	}
 
+	var config zap.Config
 	if verbose {
 		// In verbose mode, use development config for more readable output
 		config = zap.NewDevelopmentConfig()
@@ -29,6 +33,7 @@ func InitLogger(verbose bool) {
 		config.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
 	} else {
 		// In non-verbose mode, only show errors and warnings
+		config = zap.NewProductionConfig()
 		config.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
 		config.Development = false
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
@@ -45,11 +50,12 @@ func InitLogger(verbose bool) {
 	}
 
 	sugar = logger.Sugar()
+	initialized = true
 }
 
 // GetLogger returns the global zap logger
 func GetLogger() *zap.Logger {
-	if logger == nil {
+	if !initialized {
 		InitLogger(false) // Default to non-verbose
 	}
 	return logger
@@ -57,7 +63,7 @@ func GetLogger() *zap.Logger {
 
 // GetSugar returns the global zap sugared logger for easier printf-style logging
 func GetSugar() *zap.SugaredLogger {
-	if sugar == nil {
+	if !initialized {
 		InitLogger(false) // Default to non-verbose
 	}
 	return sugar
@@ -65,18 +71,20 @@ func GetSugar() *zap.SugaredLogger {
 
 // LogVerbose logs a debug message using zap (replacement for the old logVerbose function)
 func LogVerbose(opts AgentOptions, format string, args ...interface{}) {
-	if sugar == nil {
+	if !opts.Verbose {
+		return // Early return to avoid sugar access when not needed
+	}
+
+	if !initialized {
 		InitLogger(opts.Verbose)
 	}
 
-	if opts.Verbose {
-		sugar.Debugf(format, args...)
-	}
+	sugar.Debugf(format, args...)
 }
 
 // LogError logs an error message using zap (replacement for the old logError function)
 func LogError(message string, err error) {
-	if sugar == nil {
+	if !initialized {
 		InitLogger(false)
 	}
 
@@ -85,7 +93,7 @@ func LogError(message string, err error) {
 
 // LogInfo logs an info message
 func LogInfo(format string, args ...interface{}) {
-	if sugar == nil {
+	if !initialized {
 		InitLogger(false)
 	}
 
@@ -94,16 +102,16 @@ func LogInfo(format string, args ...interface{}) {
 
 // LogWarn logs a warning message
 func LogWarn(format string, args ...interface{}) {
-	if sugar == nil {
+	if !initialized {
 		InitLogger(false)
 	}
 
 	sugar.Warnf(format, args...)
 }
 
-// Sync flushes the logger (should be called before program exit)
+// SyncLogger flushes the logger (should be called before program exit)
 func SyncLogger() {
-	if logger != nil {
+	if initialized && logger != nil {
 		_ = logger.Sync()
 	}
 }

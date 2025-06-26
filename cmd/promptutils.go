@@ -18,32 +18,57 @@ import (
 // PromptManager handles loading and processing prompt templates
 type PromptManager struct {
 	promptDirs []string
+	funcMap    template.FuncMap // Cache template functions
 }
 
 // NewPromptManager creates a new prompt manager with default search locations
 func NewPromptManager() *PromptManager {
-	pm := &PromptManager{
-		promptDirs: []string{},
-	}
+	// Pre-allocate with known capacity
+	promptDirs := make([]string, 0, 3)
 
 	// Add current directory
-	pm.promptDirs = append(pm.promptDirs, "prompts")
+	promptDirs = append(promptDirs, "prompts")
 
 	// Add user home directory
 	if home, err := os.UserHomeDir(); err == nil {
-		pm.promptDirs = append(pm.promptDirs, filepath.Join(home, ".aws-bia", "prompts"))
+		promptDirs = append(promptDirs, filepath.Join(home, ".aws-bia", "prompts"))
 	}
 
 	// Add global directory if available
-	pm.promptDirs = append(pm.promptDirs, "/usr/local/share/aws-bia/prompts")
+	promptDirs = append(promptDirs, "/usr/local/share/aws-bia/prompts")
 
-	return pm
+	// Pre-create function map to avoid recreation on each template processing
+	funcMap := template.FuncMap{
+		"toLowerCase": strings.ToLower,
+		"toUpperCase": strings.ToUpper,
+		"replace": func(old, new, s string) string {
+			return strings.ReplaceAll(s, old, new)
+		},
+		"join":      strings.Join,
+		"split":     strings.Split,
+		"contains":  strings.Contains,
+		"hasPrefix": strings.HasPrefix,
+		"hasSuffix": strings.HasSuffix,
+		"trim":      strings.TrimSpace,
+	}
+
+	return &PromptManager{
+		promptDirs: promptDirs,
+		funcMap:    funcMap,
+	}
 }
 
 // GetAvailablePrompts returns a list of available prompts
 func (pm *PromptManager) GetAvailablePrompts() []string {
 	var prompts []string
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{}) // Use struct{} instead of bool for memory efficiency
+
+	// Pre-define supported extensions for faster lookup
+	supportedExts := map[string]struct{}{
+		".txt":    {},
+		".md":     {},
+		".prompt": {},
+	}
 
 	for _, dir := range pm.promptDirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -60,14 +85,15 @@ func (pm *PromptManager) GetAvailablePrompts() []string {
 				continue
 			}
 
-			// Check for supported extensions
+			// Check for supported extensions using map lookup (faster)
 			name := file.Name()
-			if strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".prompt") {
+			ext := filepath.Ext(name)
+			if _, supported := supportedExts[ext]; supported {
 				// Strip extension
-				baseName := strings.TrimSuffix(name, filepath.Ext(name))
-				if !seen[baseName] {
+				baseName := strings.TrimSuffix(name, ext)
+				if _, exists := seen[baseName]; !exists {
 					prompts = append(prompts, baseName)
-					seen[baseName] = true
+					seen[baseName] = struct{}{}
 				}
 			}
 		}
@@ -108,48 +134,35 @@ func (pm *PromptManager) ProcessPromptTemplate(promptContent string, vars []stri
 		return promptContent, nil
 	}
 
-	// Convert vars slice to map
-	varMap := make(map[string]interface{})
+	// Convert vars slice to map with pre-allocated capacity
+	varMap := make(map[string]interface{}, len(vars))
 	for _, v := range vars {
 		parts := strings.SplitN(v, "=", 2)
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid variable format '%s', expected 'key=value'", v)
 		}
 
+		key, value := parts[0], parts[1]
+
 		// Allow boolean and numeric values for advanced templating
-		switch strings.ToLower(parts[1]) {
+		switch strings.ToLower(value) {
 		case "true":
-			varMap[parts[0]] = true
+			varMap[key] = true
 		case "false":
-			varMap[parts[0]] = false
+			varMap[key] = false
 		default:
 			// Try to parse as number
-			if num, err := strconv.ParseFloat(parts[1], 64); err == nil {
-				varMap[parts[0]] = num
+			if num, err := strconv.ParseFloat(value, 64); err == nil {
+				varMap[key] = num
 			} else {
 				// Default to string
-				varMap[parts[0]] = parts[1]
+				varMap[key] = value
 			}
 		}
 	}
 
-	// Create a template with handlebars-style functions for more powerful templating
-	funcMap := template.FuncMap{
-		"toLowerCase": strings.ToLower,
-		"toUpperCase": strings.ToUpper,
-		"replace": func(old, new, s string) string {
-			return strings.ReplaceAll(s, old, new)
-		},
-		"join":      strings.Join,
-		"split":     strings.Split,
-		"contains":  strings.Contains,
-		"hasPrefix": strings.HasPrefix,
-		"hasSuffix": strings.HasSuffix,
-		"trim":      strings.TrimSpace,
-	}
-
-	// Parse and execute the template
-	tmpl, err := template.New("prompt").Funcs(funcMap).Parse(promptContent)
+	// Parse and execute the template using cached function map
+	tmpl, err := template.New("prompt").Funcs(pm.funcMap).Parse(promptContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse prompt template: %w", err)
 	}
@@ -176,21 +189,24 @@ func (pm *PromptManager) findPromptByName(name string) (string, error) {
 	// Try with different extensions
 	extensions := []string{"", ".txt", ".md", ".prompt"}
 
+	// Pre-check if name already has an extension to avoid unnecessary suffix checks
+	hasExtension := strings.Contains(name, ".")
+
 	for _, ext := range extensions {
-		nameWithExt := name
-		if ext != "" && !strings.HasSuffix(name, ext) {
+		var nameWithExt string
+		if ext == "" || (hasExtension && strings.HasSuffix(name, ext)) {
+			nameWithExt = name
+		} else if !hasExtension {
 			nameWithExt = name + ext
+		} else {
+			continue // Skip if name has extension but doesn't match current ext
 		}
 
 		// Search in prompt directories
 		for _, dir := range pm.promptDirs {
 			path := filepath.Join(dir, nameWithExt)
-			if _, err := os.Stat(path); err == nil {
-				// Found the prompt file
-				data, err := os.ReadFile(path)
-				if err != nil {
-					return "", err
-				}
+			if data, err := os.ReadFile(path); err == nil {
+				// Found and read the prompt file in one step
 				return string(data), nil
 			}
 		}
