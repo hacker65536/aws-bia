@@ -1,6 +1,6 @@
-# AWS-BIA (AWS Bedrock Intelligent Agents CLI)
+# AWS-BIA (AWS Bedrock Invoke Agent CLI)
 
-A powerful command-line interface tool for interacting with AWS Bedrock Intelligent Agents. AWS-BIA provides a comprehensive set of features including streaming responses, file uploads, prompt templates, and flexible configuration options.
+A powerful command-line interface tool for interacting with AWS Bedrock Invoke Agent. AWS-BIA provides a comprehensive set of features including streaming responses, file uploads, prompt templates, and flexible configuration options.
 
 ## Installation
 
